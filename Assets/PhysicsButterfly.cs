@@ -30,12 +30,16 @@ public class PhysicsButterfly : MonoBehaviour
     [SerializeField] float rotVelocity = 166;//[rps]
     [SerializeField] float maxFreq = 15;
     [SerializeField] float minFreq = 7;
- 
+
+    [SerializeField] Transform rightWing;
+    [SerializeField] Transform leftWing;
+    [SerializeField] float maxliftPower = 50;
+    [SerializeField] float maxdragPower = 50;
+
     Vector3 velocity;
     Vector3 position;
     float rotVelocity_degps;//[deg/s]
 
-    float omega;
     float preFlappingAngle;
     float preFeatheringAngle;
     
@@ -43,7 +47,8 @@ public class PhysicsButterfly : MonoBehaviour
     float liftPower(float rad)
     {
         //TODO: 関数定義
-        return 1.1f;
+        //return 1.1f;
+        return Mathf.Sin(2 * rad);
     }
 
     float dragPower(float rad)
@@ -58,6 +63,7 @@ public class PhysicsButterfly : MonoBehaviour
         float v = velocityAir.magnitude;
         float square = width * 2 * height;
         float power = 0.5f * airDensity * v * v * square * liftPower(attackAngle);
+        power = Mathf.Min(maxliftPower, power);
         return power * Vector3.up;
     }
 
@@ -66,7 +72,8 @@ public class PhysicsButterfly : MonoBehaviour
         float v = velocityAir.magnitude;
         float square = width * 2 * height;
         float power = 0.5f * airDensity * v * v * square * dragPower(attackAngle);
-        return power * Vector3.up;
+        power = Mathf.Min(maxdragPower, power);
+        return power * -transform.forward;
     }
 
     float flappingAngle(float freq, float downFlapping_deg, float upFlapping_deg)
@@ -97,7 +104,6 @@ public class PhysicsButterfly : MonoBehaviour
         velocity = Vector3.zero;
         position = transform.position;
         rotVelocity_degps = 360 * rotVelocity;
-        omega = 0;
         preFlappingAngle = 0;
         preFeatheringAngle = 0;
     }
@@ -105,21 +111,19 @@ public class PhysicsButterfly : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        Debug.Log(position);
         //旋回運動
-        Vector3 forward = -transform.forward;
+        Vector3 forward = transform.forward;
         Vector3 toTarget = targetPosition - position;
         float phi = Vector3.SignedAngle(forward, toTarget, Vector3.up);
-        float yRot;
         if (Mathf.Abs(phi) < phiMax_deg)
         {
-            yRot = rotVelocity_degps * Time.deltaTime;
-            //transform.Rotate(0, rotVelocity_degps * Time.deltaTime, 0);
+            transform.Rotate(0, rotVelocity_degps * Time.deltaTime, 0);
         }
-        else
+        else if(Mathf.Abs(phi) > phiMax_deg)
         {
-            //TODO: 急旋回モード
-            yRot = rotVelocity_degps * Time.deltaTime;
-            //transform.Rotate(0, rotVelocity_degps * Time.deltaTime, 0);
+            //急旋回モード
+            transform.Rotate(0, phi * Time.deltaTime, 0);
         }
 
         //高度調整
@@ -128,7 +132,7 @@ public class PhysicsButterfly : MonoBehaviour
         float freq;
         float psiOffset_deg;
 
-        float psi = Vector3.SignedAngle(forward, toTarget, Vector3.right);
+        float psi = Vector3.SignedAngle(toTarget, forward, transform.right);
         if (psiUp_deg >= psi)
         {
             //上昇モード
@@ -157,9 +161,9 @@ public class PhysicsButterfly : MonoBehaviour
         {
             //急降下モード
             //TODO: アゲハはいらないのであとで実装
-            upFlapping_deg = minUpFlapping_deg;
-            downFlapping_deg = minDownFlapping_deg;
-            freq = minFreq;
+            upFlapping_deg = maxUpFlapping_deg;
+            downFlapping_deg = maxUpFlapping_deg;
+            freq = 0;
             psiOffset_deg = offsetAngleRate * psiDown_deg;
         }
 
@@ -170,26 +174,45 @@ public class PhysicsButterfly : MonoBehaviour
         float featheringAngle_deg = featheringAngle(freq);
         float pitchAngle_deg = pitchingAngle(freq);
 
-        transform.Rotate(pitchAngle_deg, yRot, 0);
+        rightWing.localRotation = Quaternion.Euler(featheringAngle_deg, 0, -flapAngle_deg);
+        leftWing.localRotation = Quaternion.Euler(featheringAngle_deg, 0, flapAngle_deg);
+        var currentRot = transform.rotation.eulerAngles;
+        //transform.rotation = Quaternion.Euler(pitchAngle_deg, currentRot.y, currentRot.z);
 
         var subFlap = flapAngle_deg - preFlappingAngle;
         var subFeather = featheringAngle_deg - preFeatheringAngle;
 
         var subFlap_rad = subFlap * Mathf.Deg2Rad;
-        omega = subFlap_rad / Time.deltaTime;
+        var subFeather_rad = subFeather * Mathf.Deg2Rad;
+        var omega1 = subFlap_rad / Time.deltaTime;
+        var omega2 = subFeather_rad / Time.deltaTime;
 
-        Vector3 om = Quaternion.Euler(0, 0, flapAngle_deg) * Vector3.down;
-        Vector3 velocityWing = width * averagePointRate * omega * om.normalized;
+        Vector3 om1 = Quaternion.Euler(0, 0, flapAngle_deg) * Vector3.down;
+        om1 *= omega1;
+        Vector3 om2 = Quaternion.Euler(featheringAngle_deg, 0, 0) * Vector3.down;
+        om2 *= omega2;
+        Vector3 omega = om1 + om2;
+        Vector3 velocityWing = width * averagePointRate * omega;
 
         Vector3 velocityAir = -(velocity + velocityWing);
 
-        float attackAngle = Vector3.SignedAngle(-Vector3.forward, -transform.forward, Vector3.right);
-        Vector3 forceWing = lift(attackAngle, velocityAir) + drag(attackAngle, velocityAir);
-        Vector3 force = 2 * forceWing + mass * gravity * Vector3.down; //両翅の力の合力と重力
 
-        
-        position += velocity * Time.deltaTime;
-        velocity += force / mass * Time.deltaTime;
+        float attackAngle_r = Vector3.Angle(rightWing.forward, -velocityAir);
+        float attackAngle_l = Vector3.Angle(leftWing.forward, -velocityAir);
+        Vector3 forceWing_r = lift(attackAngle_r, velocityAir) + drag(attackAngle_r, velocityAir);
+        forceWing_r /= 100000.0f;
+        Vector3 forceWing_l = lift(attackAngle_l, velocityAir) + drag(attackAngle_l, velocityAir);
+        forceWing_l /= 100000.0f;
+
+        float mass_kg = mass / 1000.0f;
+        Vector3 force = forceWing_r + forceWing_l + (mass_kg * gravity * Vector3.down); //両翅の力の合力と重力
+
+        Debug.Log("forceWing_r: " + forceWing_r.magnitude);
+        Debug.Log("forceWing_l: " + forceWing_l.magnitude);
+        //Debug.Log("重力: " + (mass_kg * gravity * Vector3.down).ToString("F10"));
+
+        position += velocity * Time.deltaTime / 100.0f;
+        velocity += force / mass_kg * Time.deltaTime*100.0f;
         transform.position = position;
 
 
