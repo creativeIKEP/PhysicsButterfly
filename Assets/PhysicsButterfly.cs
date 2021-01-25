@@ -4,7 +4,8 @@ using UnityEngine;
 
 public class PhysicsButterfly : MonoBehaviour
 {
-    public Vector3 targetPosition;
+    public Transform targetPosition;
+    public float timeParam;
 
     [SerializeField] float airDensity = 0.00128f; //[g/cm^3]
     [SerializeField] float width = 5.5f; //[cm]
@@ -61,39 +62,39 @@ public class PhysicsButterfly : MonoBehaviour
     Vector3 lift(float attackAngle, Vector3 velocityAir)
     {
         float v = velocityAir.magnitude;
-        float square = width * 2 * height;
+        float square = width * height;
         float power = 0.5f * airDensity * v * v * square * liftPower(attackAngle);
-        power = Mathf.Min(maxliftPower, power);
+        //power = Mathf.Min(maxliftPower, power);
         return power * Vector3.up;
     }
 
     Vector3 drag(float attackAngle, Vector3 velocityAir)
     {
         float v = velocityAir.magnitude;
-        float square = width * 2 * height;
+        float square = width * height;
         float power = 0.5f * airDensity * v * v * square * dragPower(attackAngle);
-        power = Mathf.Min(maxdragPower, power);
-        return power * -transform.forward;
+        //power = Mathf.Min(maxdragPower, power);
+        return power * transform.forward;
     }
 
     float flappingAngle(float freq, float downFlapping_deg, float upFlapping_deg)
     {
         //TODO: 関数定義
-        float t = Mathf.Sin(2 * Mathf.PI * Time.time * freq);
+        float t = Mathf.Sin(2 * Mathf.PI * Time.time * timeParam * freq);
         return Mathf.Lerp(downFlapping_deg, upFlapping_deg, t);
     }
 
     float featheringAngle(float freq)
     {
         //TODO: 関数定義
-        float t = Mathf.Sin(2 * Mathf.PI * Time.time * freq);
+        float t = Mathf.Sin(2 * Mathf.PI * Time.time * timeParam * freq);
         return Mathf.Lerp(downFeathering_deg, upFeathering_deg, t);
     }
 
     float pitchingAngle(float freq)
     {
         //TODO: 関数定義
-        float t = Mathf.Sin(2 * Mathf.PI * Time.time * freq);
+        float t = Mathf.Sin(2 * Mathf.PI * Time.time * timeParam * freq);
         return Mathf.Lerp(downPitching_deg, upPitching_deg, t);
     }
 
@@ -111,19 +112,20 @@ public class PhysicsButterfly : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        Debug.Log(position);
+        float deltaTime = Time.deltaTime * timeParam;
+
         //旋回運動
-        Vector3 forward = transform.forward;
-        Vector3 toTarget = targetPosition - position;
-        float phi = Vector3.SignedAngle(forward, toTarget, Vector3.up);
+        //Vector3 forward = transform.forward;
+        Vector3 toTarget = targetPosition.position - position;
+        float phi = Vector3.SignedAngle(transform.forward, toTarget, Vector3.up);
         if (Mathf.Abs(phi) < phiMax_deg)
         {
-            transform.Rotate(0, rotVelocity_degps * Time.deltaTime, 0);
+            transform.Rotate(0, rotVelocity_degps * deltaTime, 0);
         }
         else if(Mathf.Abs(phi) > phiMax_deg)
         {
             //急旋回モード
-            transform.Rotate(0, phi * Time.deltaTime, 0);
+            transform.Rotate(0, phi * deltaTime, 0);
         }
 
         //高度調整
@@ -132,25 +134,29 @@ public class PhysicsButterfly : MonoBehaviour
         float freq;
         float psiOffset_deg;
 
-        float psi = Vector3.SignedAngle(toTarget, forward, transform.right);
-        if (psiUp_deg >= psi)
+        float psi = Vector3.SignedAngle(toTarget, transform.forward, transform.right);
+        //Debug.Log(psi);
+        if (psiUp_deg <= psi)
         {
+            //Debug.Log("上昇");
             //上昇モード
             upFlapping_deg = maxUpFlapping_deg;
             downFlapping_deg = maxDownFlapping_deg;
             freq = maxFreq;
             psiOffset_deg = offsetAngleRate * psiUp_deg;
         }
-        else if (0 <= psi && psi < psiUp_deg)
+        else if (psiDown_deg <= psi && psi < psiUp_deg)
         {
+            //Debug.Log("巡行");
             float t = (psi - psiDown_deg) / (psiUp_deg - psiDown_deg);
             upFlapping_deg = minUpFlapping_deg + (maxUpFlapping_deg - minUpFlapping_deg) * t;
             downFlapping_deg = minDownFlapping_deg;
             freq = minFreq + (maxFreq - minFreq) * t;
             psiOffset_deg = offsetAngleRate * psi;
         }
-        else if(psiDown_deg <= psi && psi < 0)
+        else if(psiDown_deg <= psi && psi < psiDown_deg)
         {
+            //Debug.Log("降下");
             //降下モード
             upFlapping_deg = minUpFlapping_deg;
             downFlapping_deg = minDownFlapping_deg;
@@ -159,8 +165,8 @@ public class PhysicsButterfly : MonoBehaviour
         }
         else
         {
+            //Debug.Log("急降下");
             //急降下モード
-            //TODO: アゲハはいらないのであとで実装
             upFlapping_deg = maxUpFlapping_deg;
             downFlapping_deg = maxUpFlapping_deg;
             freq = 0;
@@ -172,20 +178,21 @@ public class PhysicsButterfly : MonoBehaviour
         //TODO: omegaを求める
         float flapAngle_deg = flappingAngle(freq, downFlapping_deg, upFlapping_deg);
         float featheringAngle_deg = featheringAngle(freq);
-        float pitchAngle_deg = pitchingAngle(freq);
+        float pitchAngle_deg = pitchingAngle(freq) + psiOffset_deg;
 
         rightWing.localRotation = Quaternion.Euler(featheringAngle_deg, 0, -flapAngle_deg);
         leftWing.localRotation = Quaternion.Euler(featheringAngle_deg, 0, flapAngle_deg);
         var currentRot = transform.rotation.eulerAngles;
-        //transform.rotation = Quaternion.Euler(pitchAngle_deg, currentRot.y, currentRot.z);
+        transform.Rotate(-pitchAngle_deg * deltaTime, 0, 0);
+        //transform.rotation = Quaternion.Euler(-pitchAngle_deg, currentRot.y, currentRot.z);
 
         var subFlap = flapAngle_deg - preFlappingAngle;
         var subFeather = featheringAngle_deg - preFeatheringAngle;
 
         var subFlap_rad = subFlap * Mathf.Deg2Rad;
         var subFeather_rad = subFeather * Mathf.Deg2Rad;
-        var omega1 = subFlap_rad / Time.deltaTime;
-        var omega2 = subFeather_rad / Time.deltaTime;
+        var omega1 = subFlap_rad / deltaTime;
+        var omega2 = subFeather_rad / deltaTime;
 
         Vector3 om1 = Quaternion.Euler(0, 0, flapAngle_deg) * Vector3.down;
         om1 *= omega1;
@@ -193,6 +200,7 @@ public class PhysicsButterfly : MonoBehaviour
         om2 *= omega2;
         Vector3 omega = om1 + om2;
         Vector3 velocityWing = width * averagePointRate * omega;
+        velocityWing = transform.rotation * velocityWing;
 
         Vector3 velocityAir = -(velocity + velocityWing);
 
@@ -207,14 +215,10 @@ public class PhysicsButterfly : MonoBehaviour
         float mass_kg = mass / 1000.0f;
         Vector3 force = forceWing_r + forceWing_l + (mass_kg * gravity * Vector3.down); //両翅の力の合力と重力
 
-        Debug.Log("forceWing_r: " + forceWing_r.magnitude);
-        Debug.Log("forceWing_l: " + forceWing_l.magnitude);
-        //Debug.Log("重力: " + (mass_kg * gravity * Vector3.down).ToString("F10"));
-
-        position += velocity * Time.deltaTime / 100.0f;
-        velocity += force / mass_kg * Time.deltaTime*100.0f;
+        position += velocity * deltaTime / 100.0f;
+        velocity += force / mass_kg * deltaTime*100.0f;
         transform.position = position;
-
+        Debug.Log(position);
 
         preFlappingAngle = flapAngle_deg;
         preFeatheringAngle = featheringAngle_deg;
